@@ -18,7 +18,7 @@ Bring your own copy: nothing from the game is included here.
 
 ## Layout
 
-The toolkit lives next to this folder as `../xboxrecomp` (branch `ar-v014`). Put the game's files (`default.xbe` and its `media` folder) in `game/`.
+The toolkit lives next to this folder as `../xboxrecomp` (branch `ar-v014`): xboxrecomp `v0.14.0` with `patches/xboxrecomp-local.patch` applied (`git apply` in a fresh clone of the tag). Put the game's files (`default.xbe` and its `media` folder) in `game/`.
 
 | Script | What it does |
 |---|---|
