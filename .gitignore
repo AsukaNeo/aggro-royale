@@ -1,0 +1,31 @@
+# derived from the game: never commit
+src/recomp/gen/
+game/
+game_files/
+texdump/
+*.xbe
+*.iso
+*.xiso
+*.bmp
+*.png
+*.jpg
+*.wav
+*.bik
+*.log
+prof*.txt
+# build output
+build/
+build-release/
+dist/
+# local backups
+*.pre_*
+*.bak*
+# F12 captures from the game window (game-derived)
+screenshots/
+# project art is allowed
+!assets/
+!assets/*.png
+# your settings, written by the settings overlay (F10)
+aggroroyale.ini
+# frame dumps from runs (game-derived)
+shots/
