@@ -1,9 +1,16 @@
 Aggro Royale
 Copyright (c) 2026 AsukaNeo. Licensed under the MIT License (see LICENSE).
 
-This project contains no game code, data or assets. It covers only original
-source files, scripts and a patch against xboxrecomp; you must supply your own
-legally obtained copy of the game.
+This project contains no game code, data, music or assets. It covers only
+original source files, scripts and a patch against xboxrecomp; you must supply
+your own legally obtained copy of the game. The setup (aggro_setup) reads the
+optional Dave Mirra Freestyle BMX 2 and BMX XXX content from the player's own
+copies at setup time; none of it is distributed here. Their song titles and
+artists, listed in src/setup/setup.c, are named for the soundtrack menu only.
+
+The LZO1X decoder (src/setup/zaxis.c, tools/zaxis_port.py), used to read
+BMX XXX's compressed level files, is written from the format and contains no
+code from the LZO libraries (GPL).
 
 Builds on xboxrecomp by sp00nz and contributors (MIT):
   https://github.com/sp00nznet/xboxrecomp

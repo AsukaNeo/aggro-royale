@@ -19,6 +19,19 @@ void ar_xiso_close(DrXiso *x);
  * buffer. NULL if absent or unreadable. */
 void *ar_xiso_read_root_file(DrXiso *x, const char *name, size_t *size);
 
+/* A folder's entries by path from the root ("media/assets/levels"; '/' or
+ * '\\', any case), malloc'd; NULL with *count 0 if there is no such folder. */
+typedef struct {
+    char     name[256];
+    int      dir;
+    uint32_t size;
+} ArXisoEntry;
+ArXisoEntry *ar_xiso_list(DrXiso *x, const char *dir, int *count);
+
+/* A file by path from the root, read whole into a malloc'd buffer; NULL if
+ * absent or unreadable. */
+void *ar_xiso_read_file(DrXiso *x, const char *path, size_t *size);
+
 /* Total bytes of every file in the image. */
 uint64_t ar_xiso_total_bytes(DrXiso *x);
 

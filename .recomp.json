@@ -1,0 +1,45 @@
+{
+  "$schema": "https://recomp.fyi/schema/v1.json",
+  "game": "Aggressive Inline",
+  "wikidata": "Q14447827",
+  "system": "Xbox",
+  "type": "recomp",
+  "original": {
+    "region": "USA",
+    "revision": "1",
+    "serial": "AC-007",
+    "sha1": "7693c1c861392a42fdb63dc46a2d86e9adf16726"
+  },
+  "project": "Aggro Royale",
+  "status": "playable",
+  "targets": [
+    "Windows"
+  ],
+  "toolchain": "Xboxrecomp",
+  "approach": "Static recompilation of the XBE to C with xboxrecomp; NV2A pushbuffers drawn by a Direct3D 11 back end in widescreen, CPU rasteriser as fallback",
+  "maintainers": [
+    {
+      "name": "AsukaNeo",
+      "link": "https://github.com/AsukaNeo"
+    }
+  ],
+  "links": [
+    {
+      "label": "Download",
+      "url": "https://github.com/AsukaNeo/aggro-royale/releases"
+    }
+  ],
+  "tags": [
+    "widescreen",
+    "frame-generation",
+    "mods",
+    "level-import"
+  ],
+  "help": [
+    "Grind feel and fall-through spots on the added levels",
+    "Level-up glow and blood effects",
+    "Testing on more graphics cards",
+    "Linux / Steam Deck build"
+  ],
+  "notes": "Plays start to finish: career, challenges and Free Skate. GPU renderer (Direct3D 11) in widescreen with live render resolution, optional frame generation, everything unlocked on a fresh save, saves beside the game. A setup builds it with your own North American copy and, if you own them, adds the 18 levels of Dave Mirra Freestyle BMX 2 and BMX XXX to Free Skate and both soundtracks. Next: grind feel and fall-through spots on the added levels, the level-up glow."
+}

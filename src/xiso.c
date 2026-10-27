@@ -176,6 +176,84 @@ void *ar_xiso_read_root_file(DrXiso *x, const char *name, size_t *size)
     return buf;
 }
 
+/* The entry `path` names, walking down from the root; 0 if there is none.
+ * An empty path is the root itself. */
+static int find_path(DrXiso *x, const char *path, Entry *found)
+{
+    uint32_t sector = x->root_sector, size = x->root_size;
+    char part[256];
+
+    memset(found, 0, sizeof *found);
+    found->sector = sector;
+    found->size = size;
+    found->attr = ATTR_DIRECTORY;
+    while (*path) {
+        size_t n = strcspn(path, "/\\");
+        Entry *es;
+        int count, i, hit = 0;
+        if (n == 0) {
+            path++;
+            continue;
+        }
+        if (n >= sizeof part || !(found->attr & ATTR_DIRECTORY))
+            return 0;
+        memcpy(part, path, n);
+        part[n] = 0;
+        path += n;
+        es = read_dir(x, sector, size, &count);
+        for (i = 0; i < count; i++)
+            if (!_stricmp(es[i].name, part)) {
+                *found = es[i];
+                hit = 1;
+                break;
+            }
+        free(es);
+        if (!hit)
+            return 0;
+        sector = found->sector;
+        size = found->size;
+    }
+    return 1;
+}
+
+ArXisoEntry *ar_xiso_list(DrXiso *x, const char *dir, int *count)
+{
+    Entry d, *es;
+    ArXisoEntry *out;
+    int n, i;
+
+    *count = 0;
+    if (!find_path(x, dir, &d) || !(d.attr & ATTR_DIRECTORY))
+        return NULL;
+    es = read_dir(x, d.sector, d.size, &n);
+    out = n ? (ArXisoEntry *)calloc((size_t)n, sizeof *out) : NULL;
+    for (i = 0; out && i < n; i++) {
+        memcpy(out[i].name, es[i].name, sizeof out[i].name);
+        out[i].dir = (es[i].attr & ATTR_DIRECTORY) != 0;
+        out[i].size = es[i].size;
+    }
+    free(es);
+    *count = out ? n : 0;
+    return out;
+}
+
+void *ar_xiso_read_file(DrXiso *x, const char *path, size_t *size)
+{
+    Entry e;
+    void *buf;
+
+    *size = 0;
+    if (!find_path(x, path, &e) || (e.attr & ATTR_DIRECTORY))
+        return NULL;
+    buf = malloc(e.size ? e.size : 1);
+    if (!buf || !read_at(x, x->base + (uint64_t)e.sector * SECTOR, buf, e.size)) {
+        free(buf);
+        return NULL;
+    }
+    *size = e.size;
+    return buf;
+}
+
 static uint64_t sum_dir(DrXiso *x, uint32_t sector, uint32_t size, int depth)
 {
     Entry *es;

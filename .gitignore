@@ -29,3 +29,10 @@ screenshots/
 aggroroyale.ini
 # frame dumps from runs (game-derived)
 shots/
+# the game's saves (E:\UDATA, E:\TDATA), written beside the game
+saves/
+mods/
+# build_level_menu.py and zaxis_port.py caches, local build notes
+tools/__pycache__/
+build-status.txt
+*.stderr

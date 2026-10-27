@@ -183,6 +183,44 @@ static void ar_default_env(void)
         GetPrivateProfileStringA("display", "renderer", "gpu", val, sizeof val, ini);
         _putenv_s("RECOMP_PB_BACKEND", _stricmp(val, "software") ? "d3d11" : "cpu");
         _putenv_s("AR_PB_BACKEND_SET", "1");
+
+        /* [display] frame_rate: the game's frame rate, 60 (the console's)
+         * or more, up to 240. It sets the guest vblank (RECOMP_VBLANK_HZ),
+         * which D3D presents on, and recomp_manual.c lowers the game's
+         * shortest frame step to match so it runs at the right speed. */
+        /* frame_rate=display: the monitor's own refresh rate, with the
+         * guest vblank locked to its real vertical blank
+         * (RECOMP_VBLANK_SYNC), so each frame is shown for exactly one
+         * refresh. A fixed rate the display does not divide judders. */
+        if (!getenv("RECOMP_VBLANK_HZ")) {
+            char fr[16];
+            int fps;
+            GetPrivateProfileStringA("display", "frame_rate", "60", fr, sizeof fr, ini);
+            if (!_stricmp(fr, "display")) {
+                DEVMODEA dm;
+                memset(&dm, 0, sizeof dm);
+                dm.dmSize = sizeof dm;
+                fps = EnumDisplaySettingsA(NULL, ENUM_CURRENT_SETTINGS, &dm)
+                      ? (int)dm.dmDisplayFrequency : 60;
+                if (!getenv("RECOMP_VBLANK_SYNC"))
+                    _putenv_s("RECOMP_VBLANK_SYNC", "1");
+                fprintf(stderr, "[BOOT] frame rate: the display's, %d Hz\n", fps);
+            } else {
+                fps = atoi(fr);
+            }
+            if (fps >= 60 && fps <= 240 && fps != 60) {
+                snprintf(val, sizeof val, "%d", fps);
+                _putenv_s("RECOMP_VBLANK_HZ", val);
+            }
+        }
+        /* [game] unlock_all: every level and unlock from a fresh career, as
+         * the game's own cheats give them (recomp_manual.c). On by default
+         * while levels are being added; 0 plays the career as shipped. */
+        if (!getenv("AR_UNLOCK_ALL")) {
+            char u[8];
+            GetPrivateProfileStringA("game", "unlock_all", "1", u, sizeof u, ini);
+            _putenv_s("AR_UNLOCK_ALL", u[0] == '0' ? "0" : "1");
+        }
     }
 }
 
@@ -195,7 +233,6 @@ static void ar_default_env(void)
 #define AR_VERSION "dev"
 #endif
 
-#ifdef AR_RELEASE
 /* Copy a folder's files and subfolders into another, leaving files already
  * there alone. Small trees only: the game's saves. */
 static void ar_copy_tree(const char *from, const char *to)
@@ -239,20 +276,70 @@ static int ar_has_files(const char *dir)
     return any;
 }
 
-/* Saves in the download's own folder, so the folder is portable: the game,
- * the settings and the saves move together. A "saves" folder beside the exe
- * holds the title's E:\UDATA and E:\TDATA (RECOMP_SAVE_DIR, which moves just
+/* Saves beside the game, never in a user-data folder: the game, the
+ * settings and the saves move together. A "saves" folder next to the "game"
+ * folder (beside the exe in a download, the checkout's root in a developer
+ * build; beside the exe when the game was picked from elsewhere) holds the title's E:\UDATA and E:\TDATA (RECOMP_SAVE_DIR, which moves just
  * those); the Xbox's partition images (5 GB, sparse) and caches, which the
  * game rebuilds on its own, stay in old_dir on this machine. [game] saves in
  * aggroroyale.ini names another folder (relative to the exe), and a
  * RECOMP_SAVE_DIR you set wins. Where the exe's folder can't be written
  * (Program Files), the saves stay in old_dir as before. Saves an earlier
  * version left in old_dir are copied over once. */
+/* Mods: each folder in "mods" beside the game is laid over the game folder
+ * (RECOMP_MODS, kernel_path.c), files there replacing the game's at the same
+ * path -- mods\<name>\media\assets\audio\sellout.wma for that song.
+ * Folders are taken in name order, the first holding a file winning; one
+ * whose name starts with '_' is skipped, which turns a mod off. */
+static void ar_mods(void)
+{
+    char exe_dir[MAX_PATH], base[MAX_PATH], pattern[MAX_PATH], list[2048], *slash;
+    WIN32_FIND_DATAA fd;
+    HANDLE h;
+
+    if (getenv("RECOMP_MODS"))
+        return;
+    GetModuleFileNameA(NULL, exe_dir, MAX_PATH);
+    if ((slash = strrchr(exe_dir, '\\')) != NULL)
+        *slash = 0;
+    snprintf(base, sizeof base, "%s", exe_dir);
+    if (s_game_dir[0]) {
+        char g[MAX_PATH];
+        snprintf(g, sizeof g, "%s", s_game_dir);
+        if ((slash = strrchr(g, '\\')) != NULL && !_stricmp(slash + 1, "game")) {
+            *slash = 0;
+            snprintf(base, sizeof base, "%s", g);
+        }
+    }
+    snprintf(pattern, sizeof pattern, "%s\\mods\\*", base);
+    list[0] = 0;
+    h = FindFirstFileA(pattern, &fd);
+    if (h == INVALID_HANDLE_VALUE)
+        return;
+    do {
+        if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) || fd.cFileName[0] == '.'
+                || fd.cFileName[0] == '_')
+            continue;
+        if (strlen(list) + strlen(base) + strlen(fd.cFileName) + 8 >= sizeof list)
+            break;
+        if (list[0])
+            strcat(list, ";");
+        strcat(list, base);
+        strcat(list, "\\mods\\");
+        strcat(list, fd.cFileName);
+        fprintf(stderr, "[BOOT] mod: %s\n", fd.cFileName);
+    } while (FindNextFileA(h, &fd));
+    FindClose(h);
+    if (list[0])
+        _putenv_s("RECOMP_MODS", list);
+}
+
 static void ar_portable_saves(const char *old_dir)
 {
     char exe_dir[MAX_PATH], ini[MAX_PATH], want[MAX_PATH], dir[MAX_PATH];
     char probe[MAX_PATH], from[MAX_PATH], to[MAX_PATH], *slash;
     static const char *const subs[] = { "UDATA", "TDATA" };
+    char base[MAX_PATH];
     HANDLE f;
     size_t i;
 
@@ -262,11 +349,21 @@ static void ar_portable_saves(const char *old_dir)
     if ((slash = strrchr(exe_dir, '\\')) != NULL)
         *slash = 0;
     snprintf(ini, sizeof ini, "%s\\aggroroyale.ini", exe_dir);
+    /* The folder that holds "game", else the exe's. */
+    snprintf(base, sizeof base, "%s", exe_dir);
+    if (s_game_dir[0]) {
+        char g[MAX_PATH];
+        snprintf(g, sizeof g, "%s", s_game_dir);
+        if ((slash = strrchr(g, '\\')) != NULL && !_stricmp(slash + 1, "game")) {
+            *slash = 0;
+            snprintf(base, sizeof base, "%s", g);
+        }
+    }
     GetPrivateProfileStringA("game", "saves", "saves", want, sizeof want, ini);
     if (want[0] == '\\' || (want[0] && want[1] == ':'))
         snprintf(dir, sizeof dir, "%s", want);
     else
-        snprintf(dir, sizeof dir, "%s\\%s", exe_dir, want);
+        snprintf(dir, sizeof dir, "%s\\%s", base, want);
 
     /* Writable? Make it and drop a file in it. */
     CreateDirectoryA(dir, NULL);
@@ -291,7 +388,275 @@ static void ar_portable_saves(const char *old_dir)
     _putenv_s("RECOMP_SAVE_DIR", dir);
     fprintf(stderr, "[BOOT] saves: %s\n", dir);
 }
-#endif
+
+/* ── Soundtracks ───────────────────────────────────────────── */
+
+/* The game plays Xbox custom soundtracks -- the ones a console ripped from
+ * CDs to its hard disk -- through XAPI's soundtrack database, E:\TDATA\
+ * FFFE0000\MUSIC\ST.DB, each song MUSIC\<soundtrack id %04x>\<song id
+ * %08x>.WMA, and its options menu switches between "Inline Soundtrack" and
+ * those. So more music needs no change to the game: at each start this
+ * writes that database into the saves' TDATA with one soundtrack, "Aggro
+ * Royale Mix": every mod's songs, which the menu lists after the game's own
+ * 13. A mod lists
+ * its songs in soundtrack.txt ("name: <soundtrack>", then "<file> | <title>
+ * | <artist>" per line). The song files are hard links where the volume
+ * allows, else copies.
+ *
+ * ST.DB is 512-byte blocks (the reader, sub_000FF184 and sub_000FF2D0):
+ * block 0 the header, block 1 + i soundtrack i, block 0x65 + g song group g
+ * of six songs. */
+#define ST_MAX_SONGS  84 * 6
+#define ST_MAX_TRACKS 16
+
+typedef struct { char path[MAX_PATH]; WCHAR name[32]; uint32_t ms; } ArSong;
+typedef struct { WCHAR name[32]; int first, count; } ArTrack;
+
+static ArSong  s_st_song[ST_MAX_SONGS];
+static int     s_st_nsongs;
+static ArTrack s_st_track[ST_MAX_TRACKS];
+static int     s_st_ntracks;
+
+/* A WMA's length from its ASF File Properties object, in ms; 0 if unknown. */
+static uint32_t ar_wma_ms(const char *path)
+{
+    static const unsigned char fp_guid[16] = { 0xA1, 0xDC, 0xAB, 0x8C, 0x47, 0xA9, 0xCF, 0x11,
+                                               0x8E, 0xE4, 0x00, 0xC0, 0x0C, 0x20, 0x53, 0x65 };
+    unsigned char d[8192];
+    uint32_t n, i, off = 30, ms = 0;
+    size_t got;
+    FILE *f = fopen(path, "rb");
+    if (!f)
+        return 0;
+    got = fread(d, 1, sizeof d, f);
+    fclose(f);
+    if (got < 30)
+        return 0;
+    memcpy(&n, d + 24, 4);
+    for (i = 0; i < n && off + 24 <= got; i++) {
+        uint64_t size, play, preroll;
+        memcpy(&size, d + off + 16, 8);
+        if (!memcmp(d + off, fp_guid, 16) && off + 24 + 64 <= got) {
+            memcpy(&play, d + off + 24 + 40, 8);       /* 100 ns units */
+            memcpy(&preroll, d + off + 24 + 56, 8);    /* ms */
+            ms = (uint32_t)(play / 10000 - preroll);
+        }
+        if (size < 24)
+            break;
+        off += (uint32_t)size;
+    }
+    return ms;
+}
+
+/* "Title - Artist" when it fits the database's 31 characters, else the title. */
+static void ar_song_name(WCHAR out[32], const char *title, const char *artist)
+{
+    char both[160];
+    snprintf(both, sizeof both, "%s - %s", title, artist);
+    MultiByteToWideChar(CP_ACP, 0, artist && *artist && strlen(both) <= 31 ? both : title,
+                        -1, out, 32);
+    out[31] = 0;
+}
+
+static void ar_add_song(const char *path, const char *title, const char *artist)
+{
+    ArSong *s;
+    if (s_st_nsongs >= ST_MAX_SONGS || GetFileAttributesA(path) == INVALID_FILE_ATTRIBUTES)
+        return;
+    s = &s_st_song[s_st_nsongs++];
+    snprintf(s->path, sizeof s->path, "%s", path);
+    ar_song_name(s->name, title, artist);
+    s->ms = ar_wma_ms(path);
+}
+
+static char *ar_trim(char *s)
+{
+    char *e;
+    while (*s == ' ' || *s == '\t')
+        s++;
+    e = s + strlen(s);
+    while (e > s && (e[-1] == ' ' || e[-1] == '\t' || e[-1] == '\r' || e[-1] == '\n'))
+        *--e = 0;
+    return s;
+}
+
+/* One mod's soundtrack.txt: its songs appended, its soundtrack named. */
+static void ar_read_soundtrack(const char *mod_dir)
+{
+    char path[MAX_PATH], line[512];
+    FILE *f;
+    ArTrack *t;
+
+    snprintf(path, sizeof path, "%s\\soundtrack.txt", mod_dir);
+    if (!(f = fopen(path, "r")) || s_st_ntracks >= ST_MAX_TRACKS) {
+        if (f) fclose(f);
+        return;
+    }
+    t = &s_st_track[s_st_ntracks];
+    memset(t, 0, sizeof *t);
+    t->first = s_st_nsongs;
+    {
+        const char *slash = strrchr(mod_dir, '\\');
+        MultiByteToWideChar(CP_ACP, 0, slash ? slash + 1 : mod_dir, -1, t->name, 32);
+    }
+    while (fgets(line, sizeof line, f)) {
+        char *l = ar_trim(line), *title, *artist, *bar;
+        if (!*l || *l == '#')
+            continue;
+        if (!_strnicmp(l, "name:", 5)) {
+            MultiByteToWideChar(CP_ACP, 0, ar_trim(l + 5), -1, t->name, 32);
+            t->name[31] = 0;
+            continue;
+        }
+        if (!(bar = strchr(l, '|')))
+            continue;
+        *bar = 0;
+        title = bar + 1;
+        artist = "";
+        if ((bar = strchr(title, '|')) != NULL) {
+            *bar = 0;
+            artist = ar_trim(bar + 1);
+        }
+        snprintf(path, sizeof path, "%s\\%s", mod_dir, ar_trim(l));
+        for (bar = path; *bar; bar++)
+            if (*bar == '/') *bar = '\\';
+        ar_add_song(path, ar_trim(title), artist);
+    }
+    fclose(f);
+    t->count = s_st_nsongs - t->first;
+    if (t->count) {
+        fprintf(stderr, "[BOOT] soundtrack \"%S\": %d songs\n", t->name, t->count);
+        s_st_ntracks++;
+    }
+}
+
+static void ar_soundtracks(void)
+{
+    /* The game's own songs, titled as its "Inline Soundtrack" titles them. */
+    static const char *const own[13][2] = {
+        { "choiceisyoursremix.wma", "The Choice Is Yours" },
+        { "imacloudclean.wma",      "I'm a Cloud" },
+        { "youthofanation.wma",     "Youth of the Nation" },
+        { "mondaymorning.wma",      "Monday Morning" },
+        { "sellout.wma",            "Sellout" },
+        { "passingmeby.wma",        "Passing Me By" },
+        { "yourdisease.wma",        "Your Disease" },
+        { "ideaforamovie.wma",      "An Idea for a Movie" },
+        { "wrongway.wma",           "Wrong Way" },
+        { "dontsweat.wma",          "Don't Sweat the Technique" },
+        { "song13edit.wma",         "Track 13" },
+        { "crawlinginthedark.wma",  "Crawling in the Dark" },
+        { "fallingforyou.wma",      "Falling for You" },
+    };
+    const char *user = getenv("RECOMP_SAVE_DIR"), *mods = getenv("RECOMP_MODS");
+    char music[MAX_PATH], path[MAX_PATH], dir[MAX_PATH];
+    static unsigned char db[(0x65 + ST_MAX_SONGS / 6 + 1) * 512];
+    int i, k, ngroups = 0, own_count, mod_songs;
+    FILE *f;
+
+    if (!user || !*user || !s_game_dir[0])
+        return;
+    s_st_nsongs = s_st_ntracks = 0;
+    for (i = 0; i < 13; i++) {
+        snprintf(path, sizeof path, "%s\\media\\assets\\audio\\%s", s_game_dir, own[i][0]);
+        ar_add_song(path, own[i][1], "");
+    }
+    own_count = s_st_nsongs;
+    s_st_ntracks = 0;
+    while (mods && *mods) {
+        const char *end = strchr(mods, ';');
+        size_t n = end ? (size_t)(end - mods) : strlen(mods);
+        if (n && n < sizeof dir) {
+            memcpy(dir, mods, n);
+            dir[n] = 0;
+            ar_read_soundtrack(dir);
+        }
+        mods = end ? end + 1 : NULL;
+    }
+    mod_songs = s_st_nsongs - own_count;
+    if (!mod_songs)
+        return;                 /* nothing to add: the game's own soundtrack */
+    /* A soundtrack per mod, of its songs alone: the game's menu lists its
+     * own 13 and then every soundtrack's songs, so the game's songs, or a
+     * mix of every mod's beside the mods' own, showed songs two or three
+     * times. Its song-title table holds 32 songs a soundtrack (sub_00075F30,
+     * 0x104C bytes), so a mod's beyond that are left out. */
+    for (i = 0; i < s_st_ntracks; i++)
+        if (s_st_track[i].count > 32) {
+            fprintf(stderr, "[BOOT] soundtrack \"%S\": %d songs, the first 32 kept\n",
+                    s_st_track[i].name, s_st_track[i].count);
+            s_st_track[i].count = 32;
+        }
+
+    snprintf(music, sizeof music, "%s\\TDATA", user);
+    CreateDirectoryA(music, NULL);
+    strcat(music, "\\FFFE0000");
+    CreateDirectoryA(music, NULL);
+    strcat(music, "\\MUSIC");
+    CreateDirectoryA(music, NULL);
+
+    memset(db, 0, sizeof db);
+    for (i = 0; i < s_st_ntracks; i++) {
+        ArTrack *t = &s_st_track[i];
+        uint32_t *rec = (uint32_t *)(db + (1 + i) * 512), total = 0;
+        uint32_t id = (uint32_t)i + 1;
+        WCHAR *name = (WCHAR *)(db + (1 + i) * 512 + 352);
+
+        ((uint32_t *)db)[3 + i] = id;            /* header: soundtrackIds[] */
+        snprintf(dir, sizeof dir, "%s\\%04x", music, id);
+        CreateDirectoryA(dir, NULL);
+        rec[0] = 0x21371;
+        rec[1] = id;
+        rec[2] = (uint32_t)t->count;
+        for (k = 0; k < t->count; k++) {
+            ArSong *s = &s_st_song[t->first + k];
+            int g = k / 6, j = k % 6;
+            uint32_t song_id = (id << 16) | (uint32_t)k;
+            uint32_t *grp;
+            if (j == 0) {
+                if (0x65 + ngroups >= (int)(sizeof db / 512))
+                    break;
+                rec[3 + g] = (uint32_t)ngroups;
+                grp = (uint32_t *)(db + (0x65 + ngroups) * 512);
+                grp[0] = 0x31073;
+                grp[1] = id;
+                grp[2] = (uint32_t)ngroups;
+                ngroups++;
+            }
+            grp = (uint32_t *)(db + (0x65 + rec[3 + g]) * 512);
+            grp[4 + j] = song_id;
+            grp[10 + j] = s->ms;
+            memcpy((WCHAR *)(grp + 16) + j * 32, s->name, 32 * sizeof(WCHAR));
+            total += s->ms;
+            snprintf(path, sizeof path, "%s\\%08x.WMA", dir, song_id);
+            {
+                WIN32_FILE_ATTRIBUTE_DATA a, b;
+                int same = GetFileAttributesExA(path, GetFileExInfoStandard, &a)
+                        && GetFileAttributesExA(s->path, GetFileExInfoStandard, &b)
+                        && a.nFileSizeLow == b.nFileSizeLow && a.nFileSizeHigh == b.nFileSizeHigh;
+                if (!same) {
+                    DeleteFileA(path);
+                    if (!CreateHardLinkA(path, s->path, NULL))
+                        CopyFileA(s->path, path, FALSE);
+                }
+            }
+        }
+        rec[3 + 84] = total;
+        memcpy(name, t->name, 32 * sizeof(WCHAR));
+    }
+    ((uint32_t *)db)[0] = 1;                       /* header: version */
+    ((uint32_t *)db)[1] = (uint32_t)s_st_ntracks;
+    ((uint32_t *)db)[2] = (uint32_t)s_st_ntracks + 1;
+    ((uint32_t *)db)[103] = (uint32_t)ngroups;     /* next song group id */
+    snprintf(path, sizeof path, "%s\\ST.DB", music);
+    if ((f = fopen(path, "wb")) != NULL) {
+        fwrite(db, 1, (size_t)(0x65 + ngroups) * 512, f);
+        fclose(f);
+        fprintf(stderr, "[BOOT] soundtracks: %d, %d songs (%d added by mods)\n",
+                s_st_ntracks, s_st_nsongs, mod_songs);
+    }
+}
+
 extern void xbox_LauncherRun(const char *version);
 extern int xbox_FramebufferWindowGpu(void);
 
@@ -647,18 +1012,19 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
     {
         extern void xbox_path_init(const char *game_dir, const char *save_dir);
         const char *save_dir = NULL;
-#ifdef AR_RELEASE
-        /* The Xbox's partition images and caches under the game's own name,
-         * not the toolkit's shared %LOCALAPPDATA%\xboxrecomp; the saves
-         * themselves beside the exe (ar_portable_saves). */
-        static char release_save[MAX_PATH];
+        /* The Xbox's partition images and caches (5 GB sparse, rebuilt by
+         * the game on its own) under the game's own name, not the toolkit's
+         * shared %LOCALAPPDATA%\xboxrecomp; the saves themselves beside the
+         * game (ar_portable_saves), in every build. */
+        static char cache_root[MAX_PATH];
         const char *local = getenv("LOCALAPPDATA");
         if (local && *local) {
-            snprintf(release_save, sizeof release_save, "%s\\" AR_APP, local);
-            save_dir = release_save;
+            snprintf(cache_root, sizeof cache_root, "%s\\" AR_APP, local);
+            save_dir = cache_root;
         }
         ar_portable_saves(save_dir);
-#endif
+        ar_mods();
+        ar_soundtracks();
         xbox_path_init(YOUR_GAME_DIR, save_dir);
     }
 
@@ -720,6 +1086,14 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
      * silently inert, and the one diagnostic that tells a hang from slowness
      * does nothing while appearing to be set. */
     xbox_WatchdogStart();
+    {
+        extern void ar_manual_init(void);   /* recomp_manual.c */
+        ar_manual_init();
+    }
+    if (getenv("AR_MP1")) {                 /* [mp1] bring-up probe */
+        extern void ar_mp1_start(void);
+        ar_mp1_start();
+    }
 
     /* Step 7: Call the recompiled entry point */
     printf("\nStarting game...\n");

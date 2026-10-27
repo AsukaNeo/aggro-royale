@@ -232,121 +232,420 @@ void sub_00089F20(void)
     g_esp += 4;                 /* ret: pop the return address */
 }
 
-/* [sw1] probe: D3D's swap (sub_0017F010) waits for (a) the GPU's DMA GET
- * (MEM32(device+0x23BC)+0x44) to reach device+0x24, then (b) for the swap
- * slot device+0x23C0+(0x1F+(device[0x257C]&1))*12 to be 0. A host thread
- * reports both every 5 s once the swap has been entered. Bring-up only. */
+/* sub_000F6BB0: the C runtime's memcpy (MSVC's, which also handles overlap),
+ * cdecl (dst, src, n), returns dst. Its leftover bytes go through jump tables
+ * (jmp [edx*4 + 0xF6CFC] and the like) into tails that end in `leave; ret`
+ * on its own frame, which lift as separate functions with no frame of their
+ * own: "Failed to resolve VA 0x000F6D34 / 0x000F6ED4" while the game copied
+ * its cache files. Done natively. */
+void sub_000F6BB0(void)
+{
+    uint32_t dst = MEM32(g_esp + 4);
+    uint32_t src = MEM32(g_esp + 8);
+    uint32_t n   = MEM32(g_esp + 12);
+
+    if (n)
+        memmove((void *)XBOX_PTR(dst), (const void *)XBOX_PTR(src), n);
+    g_eax = dst;
+    g_esp += 4;                 /* ret: pop the return address */
+}
+
+/* sub_0009FC30: the engine's debug print, cdecl printf(fmt, ...) indented by
+ * a nesting depth (0x206A5C). On the console it went to the debugger;
+ * here it goes nowhere unless AR_DEBUG_PRINT=1, which sends it to stderr --
+ * the engine says what it could not load or match ("No collision info on
+ * object : %s", "Didn't find topology id:%d"), which is how a ported level
+ * says what is wrong with it. */
+static int ar_debug_print = -1;
+
+static void ar_guest_format(char *out, size_t n, uint32_t fmt, uint32_t args)
+{
+    const char *f = (const char *)XBOX_PTR(fmt);
+    size_t o = 0;
+    while (*f && o + 1 < n) {
+        char spec[16];
+        size_t k = 0;
+        if (*f != '%') {
+            out[o++] = *f++;
+            continue;
+        }
+        spec[k++] = *f++;
+        while (*f && strchr("-+ #0123456789.l", *f) && k < sizeof spec - 2)
+            spec[k++] = *f++;
+        if (!*f)
+            break;
+        spec[k++] = *f;
+        spec[k] = 0;
+        switch (*f++) {
+        case 's': {
+            uint32_t p = MEM32(args);
+            args += 4;
+            o += snprintf(out + o, n - o, spec, p ? (const char *)XBOX_PTR(p) : "(null)");
+            break;
+        }
+        case 'f': case 'g': case 'e': {
+            double v;
+            memcpy(&v, (const void *)XBOX_PTR(args), 8);
+            args += 8;
+            o += snprintf(out + o, n - o, spec, v);
+            break;
+        }
+        case '%':
+            out[o++] = '%';
+            break;
+        default:                        /* d i u x X c p */
+            o += snprintf(out + o, n - o, spec, MEM32(args));
+            args += 4;
+            break;
+        }
+        if (o >= n)
+            o = n - 1;
+    }
+    out[o] = 0;
+}
+
+void sub_0009FC30(void)
+{
+    if (ar_debug_print < 0) {
+        const char *v = getenv("AR_DEBUG_PRINT");
+        ar_debug_print = v && *v == '1';
+    }
+    if (ar_debug_print) {
+        char msg[1024];
+        ar_guest_format(msg, sizeof msg, MEM32(g_esp + 4), g_esp + 8);
+        fprintf(stderr, "[AI] %s%s", msg,
+                msg[0] && msg[strlen(msg) - 1] == '\n' ? "" : "\n");
+    }
+    g_esp += 4;                 /* ret: pop the return address */
+}
+
+/* Added levels. sub_00050050(name) turns a menu's level name ("Civic",
+ * "Airfield", ... as the menu scripts set Root.FrontEnd.Level) into the
+ * level's slot, 0-13 (14 for none); the slot picks its scene name and folder
+ * from two tables of 32-byte names (0x1D9668, 0x1D99E8) and its progress
+ * record. Levels a mod adds (levels.txt, tools/build_level_menu.py) have
+ * Free Skate pages whose name is their scene; picked, they play in slot 9,
+ * "LOCAL", which no menu offers, its two table entries pointed at the
+ * level. They stay so -- the game asks again during play, and LOCAL has no
+ * other use -- until something asks for Local itself. */
+#define AR_SLOT_ADDED   9u
+#define AR_SCENE_NAMES  0x1D9668u
+#define AR_FOLDER_NAMES 0x1D99E8u
+
+typedef struct { char scene[32], folder[32]; } ArAddedLevel;
+static ArAddedLevel s_added[64];
+static int s_added_count = -1;
+static char s_local_scene[32], s_local_folder[32];
+
+static void added_levels_load(void)
+{
+    const char *mods = getenv("RECOMP_MODS");
+    s_added_count = 0;
+    while (mods && *mods) {
+        const char *end = strchr(mods, ';');
+        size_t n = end ? (size_t)(end - mods) : strlen(mods);
+        char path[512], line[256];
+        FILE *f;
+        if (n && n < sizeof path - 16) {
+            memcpy(path, mods, n);
+            strcpy(path + n, "\\levels.txt");
+            if ((f = fopen(path, "r")) != NULL) {
+                while (fgets(line, sizeof line, f) && s_added_count < 64) {
+                    char name[96], scene[64], folder[64];
+                    if (line[0] == '#' || sscanf(line, " %95[^|]| %63[^| \t\r\n] | %63[^| \t\r\n]",
+                                                 name, scene, folder) != 3)
+                        continue;
+                    snprintf(s_added[s_added_count].scene, 32, "%s", scene);
+                    snprintf(s_added[s_added_count].folder, 32, "%s", folder);
+                    s_added_count++;
+                }
+                fclose(f);
+                if (s_added_count) {
+                    fprintf(stderr, "[AR] %d added levels (%s)\n", s_added_count, path);
+                    break;              /* the first mod with a list: the menu's, all of them */
+                }
+            }
+        }
+        mods = end ? end + 1 : NULL;
+    }
+    memcpy(s_local_scene, (const void *)XBOX_PTR(AR_SCENE_NAMES + AR_SLOT_ADDED * 32), 32);
+    memcpy(s_local_folder, (const void *)XBOX_PTR(AR_FOLDER_NAMES + AR_SLOT_ADDED * 32), 32);
+}
+
+static void slot_names(const char scene[32], const char folder[32])
+{
+    memcpy((void *)XBOX_PTR(AR_SCENE_NAMES + AR_SLOT_ADDED * 32), scene, 32);
+    memcpy((void *)XBOX_PTR(AR_FOLDER_NAMES + AR_SLOT_ADDED * 32), folder, 32);
+}
+
+/* [scn] AR_SCENE_LOG=1: the scene each level start asks for (sub_000A07C0,
+ * name in edx) and the level index it took it by (0x1E9FA4). Bring-up. */
+extern void sub_000A07C0_gen(void);
+void sub_000A07C0(void)
+{
+    static int on = -1;
+    if (on < 0) {
+        const char *v = getenv("AR_SCENE_LOG");
+        on = v && *v == '1';
+    }
+    /* AR_TEST_SCENE=<scene>: every level load (the attract demo's too) loads
+     * that scene instead -- a ported level tested without the menus. The
+     * name is written into the level's own slot in the scene table. */
+    {
+        static const char *test = (const char *)-1;
+        if (test == (const char *)-1)
+            test = getenv("AR_TEST_SCENE");
+        if (test && *test && g_edx) {
+            char *slot = (char *)XBOX_PTR(g_edx);
+            snprintf(slot, 32, "%s", test);
+        }
+    }
+    if (on)
+        fprintf(stderr, "[scn] load scene \"%s\" (level index %u, mode %u, loaded %08X, list %08X)\n",
+                g_edx ? (const char *)XBOX_PTR(g_edx) : "(null)",
+                (unsigned)MEM32(0x1E9FA4), (unsigned)MEM8(0x1E9FA3),
+                (unsigned)MEM32(0x206C98), (unsigned)MEM32(0x206C94));
+    sub_000A07C0_gen();
+    if (on)
+        fprintf(stderr, "[scn]   -> %u (loaded %08X)\n", (unsigned)g_eax, (unsigned)MEM32(0x206C98));
+}
+
+extern void sub_00050050_gen(void);
+void sub_00050050(void)
+{
+    uint32_t arg = MEM32(g_esp + 4);
+    const char *name = arg ? (const char *)XBOX_PTR(arg) : "";
+    int i;
+
+    if (s_added_count < 0)
+        added_levels_load();
+    for (i = 0; i < s_added_count; i++)
+        if (!_stricmp(name, s_added[i].scene)) {
+            static int shown = -1;
+            if (shown != i) {
+                fprintf(stderr, "[AR] added level %s: slot %u\n", s_added[i].scene, AR_SLOT_ADDED);
+                shown = i;
+            }
+            slot_names(s_added[i].scene, s_added[i].folder);
+            g_eax = AR_SLOT_ADDED;
+            g_esp += 4;             /* ret: pop the return address */
+            return;
+        }
+    sub_00050050_gen();
+    if (g_eax == AR_SLOT_ADDED && s_added_count)
+        slot_names(s_local_scene, s_local_folder);
+}
+
+/* sub_001003C2: D3DXMatrixPerspectiveFovLH(out, fovy, aspect, zn, zf),
+ * stdcall. The game's cameras (sub_000C3D80, sub_000C3EE0) pass a fixed
+ * aspect of 1.33 and the game never reads the console's 16:9 setting, so it
+ * renders 4:3 only. With widescreen on ([display] widescreen, which also
+ * shows the frame at 16:9), the 4:3 aspect becomes 16:9: fovy is vertical,
+ * so the view widens at the sides (Hor+) and the 640x480 frame is drawn
+ * anamorphic, which the window stretches back out. Other aspects pass
+ * through. */
+extern int xbox_FramebufferWindowWidescreen(void);
+extern void sub_001003C2_gen(void);
+void sub_001003C2(void)
+{
+    if (xbox_FramebufferWindowWidescreen()) {
+        float aspect = MEMF(g_esp + 12);
+        if (aspect > 1.32f && aspect < 1.34f)
+            MEMF(g_esp + 12) = aspect * (16.0f / 9.0f) / (4.0f / 3.0f);
+    }
+    sub_001003C2_gen();
+}
+
+/* [coll] AR_COLL_PROBE=1: sub_000ACAE0, the collision query against one
+ * object's collision tree (sphere, box, ray... by the shape at [esp+16]),
+ * counted by shape and by hit (a nonzero return), every two seconds. A
+ * ported level's floor that lets the skater through either is never
+ * queried or is queried and missed; this says which. Bring-up probe. */
+#include <time.h>
+static int s_coll_on = -1;
+static unsigned s_coll_obj_calls, s_coll_box_calls, s_coll_box_pass;
+static unsigned s_coll_calls[5], s_coll_hits[5];
+
+static void coll_report(void)
+{
+    static clock_t t0;
+    if (clock() - t0 < 2 * CLOCKS_PER_SEC)
+        return;
+    t0 = clock();
+    fprintf(stderr, "[coll] objects tried %u, box tests %u passed %u; queries by shape"
+            " 0:%u/%u 1:%u/%u 2:%u/%u 3:%u/%u other:%u/%u (calls/hits)\n",
+            s_coll_obj_calls, s_coll_box_calls, s_coll_box_pass,
+            s_coll_calls[0], s_coll_hits[0], s_coll_calls[1], s_coll_hits[1],
+            s_coll_calls[2], s_coll_hits[2], s_coll_calls[3], s_coll_hits[3],
+            s_coll_calls[4], s_coll_hits[4]);
+    s_coll_obj_calls = s_coll_box_calls = s_coll_box_pass = 0;
+    memset(s_coll_calls, 0, sizeof s_coll_calls);
+    memset(s_coll_hits, 0, sizeof s_coll_hits);
+}
+
+static int coll_on(void)
+{
+    if (s_coll_on < 0) {
+        const char *v = getenv("AR_COLL_PROBE");
+        s_coll_on = v && *v == '1';
+    }
+    return s_coll_on;
+}
+
+/* sub_000ACE20(object, query): one object against one query -- filters,
+ * then a bounding-box test (sub_000AB270), then sub_000ACAE0. */
+extern void sub_000ACE20_gen(void);
+void sub_000ACE20(void)
+{
+    sub_000ACE20_gen();
+    if (coll_on()) {
+        s_coll_obj_calls++;
+        coll_report();
+    }
+}
+
+extern void sub_000AB270_gen(void);
+void sub_000AB270(void)
+{
+    sub_000AB270_gen();
+    if (coll_on()) {
+        s_coll_box_calls++;
+        if (g_eax)
+            s_coll_box_pass++;
+    }
+}
+
+extern void sub_000ACAE0_gen(void);
+void sub_000ACAE0(void)
+{
+    uint32_t shape = MEM32(g_esp + 16);
+    unsigned kind = shape ? MEM32(shape) : 4u;
+    sub_000ACAE0_gen();
+    if (!coll_on())
+        return;
+    if (kind > 4)
+        kind = 4;
+    s_coll_calls[kind]++;
+    if (g_eax)
+        s_coll_hits[kind]++;
+    coll_report();
+}
+
+/* D3D's swap-slot waits, as spin-waits (lift.sh --spin-wait). Both are
+ * `mov eax, [slot]; ... test eax, eax; jne <the test>`: the slot is read
+ * once and the loop tests the register for ever. On the console the vblank
+ * interrupt that frees the slot cannot land in the one instruction between
+ * the read and the test often enough to matter; here the vblank runs on
+ * another core, a read just before the flip saw the slot still busy, and
+ * D3D's Reset (sub_00177540, called by the game when a loading screen
+ * starts) waited on a slot that was already free: the game froze on a black
+ * screen (2026-10-24). Each round reloads the register from the slot, as
+ * the wait means to.
+ *   0x00177573  sub_00177540: eax = [esi + ecx*4]
+ *   0x0017F0A9  sub_0017F010: eax = [ecx + edx*4] */
+static void ar_spin_wait_hook(uint32_t va)
+{
+    switch (va) {
+    case 0x00177573u: g_eax = MEM32(g_esi + g_ecx * 4); break;
+    case 0x0017F0A9u: g_eax = MEM32(g_ecx + g_edx * 4); break;
+    }
+}
+
+void ar_manual_init(void)
+{
+    extern void (*g_xbox_spin_wait_hook)(uint32_t va);
+    extern void xbox_Nv2aWidescreenHud(float z_marker);
+    g_xbox_spin_wait_hook = ar_spin_wait_hook;
+    {
+        extern void ar_unlock_all_start(void);
+        const char *u = getenv("AR_UNLOCK_ALL");
+        if (u && *u == '1')
+            ar_unlock_all_start();
+    }
+    /* The game's screen-space 2D (HUD, menus) carries z = 1.52596e6 on every
+     * vertex, positions in 640x480 pixels: squeezed to its side when the
+     * window is widescreen (the camera is widened in sub_001003C2). */
+    xbox_Nv2aWidescreenHud(1.52596e6f);
+
+    /* High frame rates. The frame function (sub_00089C70) times each frame
+     * with QueryPerformanceCounter and clamps the step to 16.7..33.3 ms
+     * (floats at 0x1A8200 and 0x1A81FC, used nowhere else): above 60 fps
+     * every frame would still count 16.7 ms and the game would run fast.
+     * With the vblank faster (RECOMP_VBLANK_HZ, the toolkit's guest vblank
+     * rate; D3D presents once per vblank), the lower clamp becomes one
+     * vblank at that rate, so the game steps by real time. */
+    {
+        const char *e = getenv("RECOMP_VBLANK_HZ");
+        int hz = e ? atoi(e) : 60;
+        if (hz > 60 && hz <= 360) {
+            MEMF(0x1A8200) = 1000.0f / (float)hz;
+            fprintf(stderr, "[AR] %d Hz: minimum frame step %.2f ms\n", hz,
+                    (double)(1000.0f / (float)hz));
+        }
+    }
+}
+
 #include <windows.h>
-extern void sub_0017F010_gen(void);
-static volatile LONG s_sw_in, s_sw_calls;
-extern volatile long g_ld_calls; extern unsigned long g_ld_tid;
-volatile long g_sw_getwait, g_sw_slotwait, g_bf_enter, g_bf_spin, g_bf_kwait;
-unsigned long g_sw_tid;
-unsigned long GetCurrentThreadId_sw(void) { return GetCurrentThreadId(); }   /* [sw1] counted in the lifted loops */
-static DWORD WINAPI sw_probe(LPVOID unused)
+/* [mp1] D3D's miniport swap state every 5 s, bring-up only: VBlankCount
+ * (+0x1C0), SwapCount (+0x1BC), and per slot the flag (+0x174 + 12k) and
+ * target vblank (+0x178 + 12k). Started from main.c's AR_MP1 hook. */
+static DWORD WINAPI mp1_thread(LPVOID unused)
 {
     (void)unused;
     for (;;) {
-        uint32_t dev, regs, k;
+        const uint32_t mp = 0x00189610u;
         Sleep(5000);
-        dev = MEM32(0x0018A2ACu);
-        if (!dev) continue;
-        regs = MEM32(dev + 0x23BC);
-        k = MEM32(dev + 0x257C) & 1;
-        fprintf(stderr, "[SW1] main=%lu loader calls=%ld tid=%lu bf enter=%ld spin=%ld kwait=%ld getwait=%ld slotwait=%ld in=%ld calls=%ld dev=%08X put(+24)=%08X regs=%08X user_put(+40)=%08X get(+44)=%08X"
-                        " fence30=%08X p34=%08X *p34=%08X slot[%u]=%08X slot[other]=%08X 257C=%08X\n",
-                g_sw_tid, g_ld_calls, g_ld_tid, g_bf_enter, g_bf_spin, g_bf_kwait, g_sw_getwait, g_sw_slotwait, s_sw_in, s_sw_calls, dev, MEM32(dev + 0x24), regs, regs ? MEM32(regs + 0x40) : 0,
-                regs ? MEM32(regs + 0x44) : 0, MEM32(dev + 0x30), MEM32(dev + 0x34),
-                MEM32(dev + 0x34) ? MEM32(MEM32(dev + 0x34)) : 0, k,
-                MEM32(dev + 0x23C0 + (0x1F + k) * 12),
-                MEM32(dev + 0x23C0 + (0x1F + (k ^ 1)) * 12), MEM32(dev + 0x257C));
+        fprintf(stderr, "[MP1] vblank %u swap %u | slot0 %u target %u | slot1 %u target %u\n",
+                (unsigned)MEM32(mp + 0x1C0), (unsigned)MEM32(mp + 0x1BC),
+                (unsigned)MEM32(mp + 0x174), (unsigned)MEM32(mp + 0x178),
+                (unsigned)MEM32(mp + 0x180), (unsigned)MEM32(mp + 0x184));
         fflush(stderr);
     }
 }
-void sub_0017F010(void)
+void ar_mp1_start(void)
 {
-    static volatile LONG started;
-    if (!InterlockedExchange(&started, 1))
-        CreateThread(NULL, 0, sw_probe, NULL, 0, NULL);
-    InterlockedIncrement(&s_sw_calls);
-    g_sw_tid = GetCurrentThreadId();
-    InterlockedIncrement(&s_sw_in);
-    sub_0017F010_gen();
-    InterlockedDecrement(&s_sw_in);
+    CreateThread(NULL, 0, mp1_thread, NULL, 0, NULL);
 }
 
-/* [sw1] who draws the loading screen while main spins: count by thread. */
-extern void sub_000B4AC0_gen(void);
-volatile long g_ld_calls; unsigned long g_ld_tid;
-void sub_000B4AC0(void)
-{
-    g_ld_calls++;
-    g_ld_tid = GetCurrentThreadId();
-    sub_000B4AC0_gen();
-}
+/* Everything unlocked ([game] unlock_all, AR_UNLOCK_ALL=1), from the first
+ * frame of a fresh career. The game's own cheats (sub_00052520, typed on
+ * its cheat screen) do it: "wwssadadBABA" sets each of the 21 level records
+ * (0x510 bytes from 0x1EB209) to state 10 with every flag at +3 set, and
+ * "sddsasasddd" sets 22 unlock bits at 0x1EA290. This does the same, once a
+ * second, to any record below that -- so a new profile is unlocked as soon
+ * as it exists and progress beyond it is never lowered -- without setting
+ * the cheats-entered flags (0x1EA2A0) that mark a save as a cheat's. */
+#define AR_LEVEL_RECORDS     0x1EB209u
+#define AR_LEVEL_RECORD_SIZE 0x510u
+#define AR_LEVEL_RECORD_END  0x1F1C59u
+#define AR_UNLOCK_BITS       0x1EA290u
 
-/* [in1] which step of the game's Init (sub_00089BF0) fails. Bring-up only. */
-extern void sub_000A06F0_gen(void);
-void sub_000A06F0(void)
+static DWORD WINAPI unlock_thread(LPVOID unused)
 {
-    fprintf(stderr, "[INIT] sub_000A06F0 ->\n");
-    sub_000A06F0_gen();
-    fprintf(stderr, "[INIT] sub_000A06F0 = %08X\n", g_eax);
-}
-extern void sub_0009FFD0_gen(void);
-void sub_0009FFD0(void)
-{
-    fprintf(stderr, "[INIT] sub_0009FFD0 ->\n");
-    sub_0009FFD0_gen();
-    fprintf(stderr, "[INIT] sub_0009FFD0 = %08X\n", g_eax);
-}
-extern void sub_000A3500_gen(void);
-void sub_000A3500(void)
-{
-    fprintf(stderr, "[INIT] sub_000A3500 -> name \"%.64s\"\n",
-            g_eax ? (const char *)XBOX_PTR(g_eax) : "(null)");
-    sub_000A3500_gen();
-    fprintf(stderr, "[INIT] sub_000A3500 = %08X\n", g_eax);
-}
-extern void sub_000A31A0_gen(void);
-void sub_000A31A0(void)
-{
-    fprintf(stderr, "[INIT] sub_000A31A0 ->\n");
-    sub_000A31A0_gen();
-    fprintf(stderr, "[INIT] sub_000A31A0 = %08X\n", g_eax);
-    {
-        int k;
-        fprintf(stderr, "[INIT]   recent ICALL targets:");
-        for (k = 0; k < 16; k++)
-            fprintf(stderr, " %08X", g_icall_trace[(g_icall_trace_idx + k) & 15]);
-        fprintf(stderr, "\n");
+    unsigned applied = 0;
+    (void)unused;
+    for (;;) {
+        uint32_t rec;
+        int changed = 0;
+        Sleep(1000);
+        for (rec = AR_LEVEL_RECORDS; rec < AR_LEVEL_RECORD_END; rec += AR_LEVEL_RECORD_SIZE)
+            if (MEM8(rec) < 0xA) {
+                MEM8(rec) = 0xA;
+                MEM32(rec + 3) = 0xFFFFFFFFu;
+                changed = 1;
+            }
+        if ((MEM32(AR_UNLOCK_BITS) & 0x3FFFFFu) != 0x3FFFFFu) {
+            MEM32(AR_UNLOCK_BITS) |= 0x3FFFFFu;
+            changed = 1;
+        }
+        if (changed && applied++ < 8) {
+            fprintf(stderr, "[AR] unlock_all: levels and unlocks set\n");
+            fflush(stderr);
+        }
     }
 }
-extern void sub_000A2AA0_gen(void);
-void sub_000A2AA0(void)
-{
-    fprintf(stderr, "[INIT] sub_000A2AA0 ->\n");
-    sub_000A2AA0_gen();
-    fprintf(stderr, "[INIT] sub_000A2AA0 = %08X\n", g_eax);
-}
 
-/* [sc1] the scene path being resolved (sub_000A96D0(path, Node **out)). */
-extern void sub_000A96D0_gen(void);
-void sub_000A96D0(void)
+void ar_unlock_all_start(void)
 {
-    static char last[96];
-    static unsigned repeats;
-    uint32_t path = MEM32(g_esp + 4);
-    if (path) {
-        const char *p = (const char *)XBOX_PTR(path);
-        if (strncmp(p, last, sizeof last - 1)) {
-            if (repeats)
-                fprintf(stderr, "[SCENE]   (x%u)\n", repeats + 1);
-            fprintf(stderr, "[SCENE] resolve \"%.80s\"\n", p);
-            strncpy(last, p, sizeof last - 1);
-            repeats = 0;
-        } else
-            repeats++;
-    }
-    sub_000A96D0_gen();
+    CreateThread(NULL, 0, unlock_thread, NULL, 0, NULL);
 }

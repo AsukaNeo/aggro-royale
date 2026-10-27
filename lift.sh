@@ -14,4 +14,4 @@ fi
 py -3 -m tools.disasm "$XBE" --analysis-json $AJ --text-only --extra-sections $SECTIONS --seed-functions "$ROOT/seeds/seed_functions.json" | tail -5
 py -3 -m tools.func_id "$XBE" | tail -3
 py -3 -m tools.abi_analysis "$XBE" | tail -3
-py -3 -m tools.recomp "$XBE" --all --split 250 --gen-dir "$ROOT/src/recomp/gen" --exclude-manual "$ROOT/src/recomp_manual.c" 2>&1 | tail -8
+py -3 -m tools.recomp "$XBE" --all --split 250 --back-edge-yield --spin-wait 0x00177573 --spin-wait 0x0017CEEB --spin-wait 0x0017D24A --spin-wait 0x0017F0A9 --gen-dir "$ROOT/src/recomp/gen" --exclude-manual "$ROOT/src/recomp_manual.c" 2>&1 | tail -8

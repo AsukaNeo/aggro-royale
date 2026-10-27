@@ -149,6 +149,27 @@ set(AR_TITLE_MARK "${CMAKE_CURRENT_SOURCE_DIR}/assets/asukaneo-mark.png")
 configure_file(src/aggro_royale.rc.in ${CMAKE_CURRENT_BINARY_DIR}/aggro_royale.rc @ONLY)
 target_sources(${PROJECT_NAME} PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/aggro_royale.rc)
 
+# aggro_setup.exe: builds the version of the game the player wants from the
+# games they own -- Aggressive Inline, plus Dave Mirra Freestyle BMX 2 and
+# BMX XXX levels and music if they have them (src/setup/setup.c). Plain C,
+# no toolkit: it only reads and writes files.
+add_executable(aggro_setup WIN32
+    src/setup/setup.c
+    src/setup/setup_src.c
+    src/setup/zaxis.c
+    src/setup/level_menu.c
+    src/game_check.c
+    src/game_import.c
+    src/xiso.c
+)
+target_link_libraries(aggro_setup PRIVATE bcrypt)
+target_compile_definitions(aggro_setup PRIVATE _CRT_SECURE_NO_WARNINGS)
+if(MSVC)
+    # The spawn heights match tools/zaxis_port.py only without contracted
+    # (fused) multiply-adds.
+    target_compile_options(aggro_setup PRIVATE /fp:precise /W3)
+endif()
+
 # The version the launcher shows.
 set(AR_VERSION "dev" CACHE STRING "Version shown on the launcher")
 target_compile_definitions(${PROJECT_NAME} PRIVATE AR_VERSION="${AR_VERSION}")
