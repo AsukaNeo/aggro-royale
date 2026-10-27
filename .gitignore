@@ -36,3 +36,5 @@ mods/
 tools/__pycache__/
 build-status.txt
 *.stderr
+# ./run.sh output
+logs/

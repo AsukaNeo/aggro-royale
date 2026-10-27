@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""fnx.py - pull the generated C around guest addresses. Run from deathrow/.
+"""fnx.py - show the generated C around guest addresses. Run from aggro-royale/.
 
-  py -3 tools/fnx.py 0x00248397 0x002486A9 0x00248387 0x002483A7 > fnx.txt
+  py -3 tools/debug/fnx.py 0x00248397 0x002486A9 0x00248387 0x002483A7 > fnx.txt
 
 For each address: the gen file + enclosing sub_, then the lines from the
 function start (capped) to a little past the address. Matches the address

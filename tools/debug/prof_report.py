@@ -1,3 +1,11 @@
+"""prof_report.py - summarise a RECOMP_PROF=1 run.
+
+  py -3 tools/debug/prof_report.py [prof.txt] [build/Release/aggro_royale.map]
+
+The sampler (src/prof_sampler.c) writes prof.txt in the working folder;
+this maps its samples to functions and object files and prints where the
+time goes, per thread.
+"""
 import re, sys, bisect, collections
 pf = sys.argv[1] if len(sys.argv) > 1 else 'prof.txt'
 mp = sys.argv[2] if len(sys.argv) > 2 else 'build/Release/aggro_royale.map'

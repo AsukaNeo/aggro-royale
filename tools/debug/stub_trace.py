@@ -1,5 +1,12 @@
+"""stub_trace.py - make every unresolved stub say when it runs.
+
+Patches src/recomp/gen/recomp_stubs_unresolved.c (generated, so a re-lift
+undoes it) so each stub prints "[STUB] sub_XXXXXXXX ret=..." the first two
+times it is called. Handy during bring-up to see which missing functions the
+game actually reaches. Run once, rebuild, run.
+"""
 import os, re
-p=os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'src', 'recomp', 'gen', 'recomp_stubs_unresolved.c')
+p=os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'src', 'recomp', 'gen', 'recomp_stubs_unresolved.c')
 s=open(p,'rb').read().decode('utf-8','surrogateescape')
 if '[STUB]' in s: print('stub_trace: already patched'); raise SystemExit
 r=re.compile(r'(void\s+(sub_[0-9A-Fa-f]+)\s*\(void\)\s*\{)')

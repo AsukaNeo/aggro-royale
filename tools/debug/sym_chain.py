@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""sym_chain.py - resolve [SAMPLE] lines from sp1 via the map.
-Run from deathrow/:  grep -a SAMPLE au19.log | python tools/sym_chain.py
+"""sym_chain.py - resolve [SAMPLE] call-chain lines in a log via the map.
+Run from aggro-royale/:  grep -a SAMPLE logs/run.log | py -3 tools/debug/sym_chain.py
 """
 import bisect, re, sys
 

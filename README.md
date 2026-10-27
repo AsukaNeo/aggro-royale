@@ -18,7 +18,7 @@
 
 ## About
 
-*Aggressive Inline* (2002) is Z-Axis's inline skating game. **Aggro Royale** turns its Xbox code into C and compiles it for a modern PC, so it runs natively, without an emulator, with modern conveniences on top. If you also own *Dave Mirra Freestyle BMX 2* or *BMX XXX*, their levels and music can join the game too. Bring your own copies: nothing from any game is included here.
+*Aggressive Inline* (2002) is Z-Axis's inline skating game, and one of the best of its era. **Aggro Royale** turns its Xbox code into C and compiles it for a modern PC, so it runs natively, no emulator, with widescreen, higher resolutions and smoother frame rates on top. If you also own *Dave Mirra Freestyle BMX 2* or *BMX XXX*, their levels and music can come along too. Bring your own copies: nothing from any game is included here.
 
 ## New levels, for the first time since 2002
 
@@ -37,9 +37,8 @@ For the first time since 2002, you can play **new levels** in *Aggressive Inline
 - ✅ GPU renderer (Direct3D 11) in widescreen, with the render resolution adjustable while you play
 - ✅ Optional frame generation up to your display's refresh rate (120 Hz and up)
 - ✅ Everything unlocked from a fresh save (can be turned off), and saves kept next to the game
-- ✅ Optional extras from your own copies: the levels of *Dave Mirra Freestyle BMX 2* (10) and *BMX XXX* (8) in Free Skate, and both games' soundtracks
-- 🚧 Added levels are free roam only (no challenges or characters), grinds feel slightly different, and a few spots let you fall out of the level
-- 🚧 Some effects are not right yet: the level-up glow, blood from falls
+- 🚧 Bonus levels and music from the BMX games (beta, see above)
+- 🚧 A couple of effects aren't right yet: the level-up glow, blood from falls
 - ⛔ No online play, and none planned
 
 ## What you need
@@ -50,16 +49,16 @@ For the first time since 2002, you can play **new levels** in *Aggressive Inline
 
 ## Setting it up
 
-Run **`aggro_setup.exe`**, next to `aggro_royale.exe`. It finds game copies next to itself; otherwise choose each one's folder or disc image.
+Run **`aggro_setup.exe`**. If your games sit next to it, it finds them on its own; if not, point each row at the game's folder or disc image.
 
 <p align="center">
   <img src="assets/setup.png" alt="The setup window" width="560">
 </p>
 
-- **Aggressive Inline** is needed. Its release is checked before anything is copied; a disc image is unpacked into a `game` folder, a folder is used where it is.
-- **Dave Mirra Freestyle BMX 2** and **BMX XXX** are optional. Tick one and its levels are converted for Free Skate and its music becomes a soundtrack, built into `mods` from your copy. Untick it and run the setup again to remove what it added.
+- **Aggressive Inline** is the one you need. The setup checks it's the right release before copying anything. A disc image gets unpacked into a `game` folder; a folder is just used where it is.
+- **Dave Mirra Freestyle BMX 2** and **BMX XXX** are optional. Tick one and its levels and music are converted into the `mods` folder. Changed your mind? Untick it and press Build again.
 
-Then press **Play**, or start `aggro_royale.exe`. Scripts can do the same: `aggro_setup --build --ai <game> --dm2 <game> --xxx <game>` (`--no-dm2` or `--no-xxx` removes one).
+Press **Build**, then **Play**. (If you only want plain *Aggressive Inline*, you can skip the setup: `aggro_royale.exe` asks for your copy the first time.) For scripts: `aggro_setup --build --ai <game> --dm2 <game> --xxx <game>`, with `--no-dm2` or `--no-xxx` to take one out.
 
 ## Build it yourself
 
@@ -75,7 +74,7 @@ You need [Build Tools for Visual Studio 2022](https://visualstudio.microsoft.com
 4. `cmake -S . -B build -A x64`, then `cmake --build build --config Release`.
 5. Run `build/Release/aggro_setup.exe`, then `build/Release/aggro_royale.exe`.
 
-`run.sh <name>` runs a build with its log in `<name>.log` and sums up crashes and missing functions. The level conversion has a Python twin for working on the formats, `tools/zaxis_port.py` and `tools/build_level_menu.py`; the setup writes the same files byte for byte.
+For testing, `./run.sh <name>` runs the build with its log in `logs/<name>.log` and lists any crashes or missing functions it hit. The other scripts are described in [tools/README.md](tools/README.md).
 
 ## Controls
 
@@ -91,7 +90,9 @@ Settings live in `aggroroyale.ini` next to the exe; the overlay writes it for yo
 
 ## Mods
 
-Each folder in `mods` is laid over the game's files: a file at `mods/<name>/media/...` replaces the game's file at the same path. Folders are applied in name order, and a folder whose name starts with `_` is skipped. A `soundtrack.txt` in a mod adds its songs as a soundtrack, and a `levels.txt` adds levels to Free Skate; `aggro_setup` writes both kinds for the BMX games.
+Anything in a `mods` folder next to the game is laid over the game's own files: put a file at `mods/<your mod>/media/...` and it replaces the game's file at that path. Mods load in name order, and starting a folder's name with `_` switches it off.
+
+A mod can also add music (a `soundtrack.txt` listing its songs) or Free Skate levels (a `levels.txt`). That's how the BMX extras work. If you're curious how their levels were made to run in *Aggressive Inline*, see [docs/porting-levels.md](docs/porting-levels.md).
 
 ## Credits
 
