@@ -6,9 +6,7 @@ Aggro Royale is MIT, so code may come only from MIT (or compatible) projects, wi
 
 ## Do next
 
-1. **Lifter fix: jump tables indexed downward.** MSVC's `memcpy`/`memmove` jump through a table indexed *below* its address. Our disassembler counts upward and decodes the rest of the table as instructions, which on another title cut `memcpy` short.
-   - Source: xenophobentx/xboxrecomp (Takedawn's toolkit) commit `0a7d117`, about 40 lines in `tools/disasm/engine.py` plus a test. MIT.
-   - Our toolkit copy doesn't have it. Needs a re-lift.
+1. **Lifter: jump tables indexed downward -- already covered.** MSVC's `memcpy`/`memmove` jump through a table indexed *below* its address. Takedawn's toolkit fixed this in commit `0a7d117`; ours already has the same fix from upstream (`c576d24`, "Measure jump tables down from the displacement as well as up": the `back` loop and `_jt_base` in `tools/disasm/engine.py`). Checked 2026-11-01 in every toolkit copy; nothing to do. (An earlier version of this note said otherwise.)
 2. **Players' own music in any format.** `ar_soundtracks` builds `ST.DB` from WMA files only. Burnout 2 converts MP3, FLAC and the rest to WMA with Windows' built-in Media Foundation (`src/custom_music.cpp`, MIT).
    - Adding that would let mods and players bring music without converting it themselves.
    - The trap: choose the 128 kbps layout with the *shortest encoded block* (Media Foundation reports 16002 or 16005 bytes/s), or the game's decoder stops early.
