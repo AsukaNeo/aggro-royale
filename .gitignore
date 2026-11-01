@@ -15,7 +15,7 @@ texdump/
 prof*.txt
 # build output
 build/
-build-release/
+build-*/
 dist/
 # local backups
 *.pre_*
@@ -25,6 +25,10 @@ screenshots/
 # project art is allowed
 !assets/
 !assets/*.png
+# the settings menu's screenshots: our own UI and logo only, taken over a
+# plain background, with nothing from the game in them
+!docs/images/
+!docs/images/*.png
 # your settings, written by the settings overlay (F10)
 aggroroyale.ini
 # frame dumps from runs (game-derived)

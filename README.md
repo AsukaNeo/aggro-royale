@@ -37,6 +37,7 @@ For the first time since 2002, you can play **new levels** in *Aggressive Inline
 - ✅ GPU renderer (Direct3D 11) in widescreen, with the render resolution adjustable while you play
 - ✅ Optional frame generation up to your display's refresh rate (120 Hz and up)
 - ✅ Everything unlocked from a fresh save (can be turned off), and saves kept next to the game
+- ✅ A settings menu laid out like a PC game's own: windowed, borderless or fullscreen at your monitor's resolutions (see [Settings](#settings))
 - 🚧 Bonus levels and music from the BMX games (beta, see above)
 - 🚧 A couple of effects aren't right yet: the level-up glow, blood from falls
 - ⛔ No online play, and none planned
@@ -82,11 +83,39 @@ Any Xbox-style controller works and plays as player 1. On the keyboard: **Enter*
 
 | Key | Action |
 |---|---|
-| F10, or Back+Start | Settings overlay |
-| Alt+Enter or F11 | Fullscreen |
+| F10, or Back+Start | Settings menu |
+| Alt+Enter or F11 | Windowed, or back to Borderless / Fullscreen |
 | F12 | Screenshot |
 
-Settings live in `aggroroyale.ini` next to the exe; the overlay writes it for you.
+## Settings
+
+Press **F10**, or **Back+Start** on the pad, at any time. The settings sit under four tabs (Q/E, Tab or the bumpers switch them), each with a line explaining what it does, and the mouse works too.
+
+<p align="center">
+  <img src="docs/images/settings-display.png" alt="The settings menu, Display tab" width="820">
+</p>
+
+**Display**
+- **Display mode**: Windowed, Borderless or Fullscreen. Fullscreen switches your monitor to the resolution you pick. Alt+Tab gives your desktop back, and it switches again when you return.
+- **Monitor**: the monitor the game shows on, numbered as Windows numbers them.
+- **Resolution**: every resolution your monitor offers, at its highest refresh rate. After a change the game asks whether to keep it, and goes back by itself after 15 seconds.
+- **VSync**, **Scale** (fit, integer or stretch), **Widescreen**, **Frame generation** and an **FPS counter**.
+
+**Graphics**: the **renderer** (Direct3D 11 or the console's own way), **render resolution** up to 4x the Xbox's, changed while you play, **anisotropic filtering** up to 16x, **sharpening** (AMD FidelityFX CAS), **FXAA**, and the filter used to scale the picture.
+
+**Controls**: **rumble** and an extra **stick dead zone** for worn sticks.
+
+**System**: **pause in background** (the game and its sound stop while the window is in the background or minimised), **screenshot**, **save settings** and **exit**.
+
+The display changes wait for "Apply display changes", as in Windows' own display settings, and settings that only take effect when the game starts offer a restart. Everything is saved in `aggroroyale.ini` next to the exe:
+
+```ini
+[display]
+mode=windowed          ; windowed, borderless or fullscreen
+monitor=               ; \\.\DISPLAY2 and so on; empty is the primary monitor
+resolution=desktop     ; WxH for fullscreen, e.g. 1920x1080, or desktop
+pause_on_focus_loss=1  ; 0 keeps the game running in the background
+```
 
 ## Mods
 
