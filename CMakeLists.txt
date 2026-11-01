@@ -74,6 +74,15 @@ target_compile_definitions(${PROJECT_NAME} PRIVATE AR_VERSION="${AR_VERSION}")
 set(AR_OVERLAY_LOGO "${CMAKE_CURRENT_SOURCE_DIR}/assets/aggro-royale-logo.png")
 set(AR_TITLE_CARD "${CMAKE_CURRENT_SOURCE_DIR}/assets/aggro-royale-wordmark.png")
 set(AR_TITLE_MARK "${CMAKE_CURRENT_SOURCE_DIR}/assets/asukaneo-mark.png")
+# The exe's icon and the settings menu's theme (RECOMP_ICON, RECOMP_THEME),
+# and its version in the four numbers a VERSIONINFO takes: 0.9.1-beta is
+# 0,9,1,0 and "dev" is 0,0,0,0.
+set(AR_ICON "${CMAKE_CURRENT_SOURCE_DIR}/assets/aggro-royale.ico")
+set(AR_THEME "${CMAKE_CURRENT_SOURCE_DIR}/assets/aggro-royale-theme.txt")
+set(AR_VERSION_RC "0,0,0,0")
+if(AR_VERSION MATCHES "([0-9]+)\\.([0-9]+)\\.([0-9]+)")
+    set(AR_VERSION_RC "${CMAKE_MATCH_1},${CMAKE_MATCH_2},${CMAKE_MATCH_3},0")
+endif()
 configure_file(src/aggro_royale.rc.in ${CMAKE_CURRENT_BINARY_DIR}/aggro_royale.rc @ONLY)
 target_sources(${PROJECT_NAME} PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/aggro_royale.rc)
 

@@ -1,0 +1,14 @@
+; The settings menu's look, linked into the exe as RECOMP_THEME
+; (xboxrecomp src/video/fb_present.c, theme_load). White and red on
+; black, after the Aggro Royale logo.
+accent  = #E8141E
+panel   = #0C0C0C
+side    = #000000
+select  = #3A0A0E
+text    = #D2D2D2
+dim     = #84848A
+value   = #FFFFFF
+hot     = #FF3C3C
+font    = Segoe UI
+heading = Impact
+caps    = 1
