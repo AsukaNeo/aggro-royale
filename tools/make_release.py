@@ -13,13 +13,15 @@ src/recomp/gen copied in. This script:
   1. configures build-release/ with -DAR_RELEASE=ON (no search of this
      machine's game folders; see CMakeLists.txt) and builds it;
   2. assembles dist/AggroRoyale-<version>/ from an allow-list: the game, the
-     setup, a short player README, a default aggroroyale.ini, the licences;
+     setup, a short player README, a default aggroroyale.ini, the shader
+     presets and librashader, the licences;
   3. zips it, then checks the zip holds exactly the allow-list, no game files,
      and no piece of any --xbe (the games' own programs) inside either exe.
 
 Nothing is published: upload the zip yourself (a GitHub release).
 """
 import argparse
+import hashlib
 import os
 import shutil
 import subprocess
@@ -55,6 +57,8 @@ pause_on_focus_loss=1
 anisotropy=0
 sharpen=0
 fxaa=0
+; shader: off, or a preset from the shaders folder.
+shader=off
 ; frame_gen: off, blend or motion -- extra frames up to your display's refresh rate.
 frame_gen=off
 
@@ -68,8 +72,45 @@ unlock_all=1
 """
 
 
+# The Shader setting: the presets in assets/shaders, and the librashader build
+# that runs them. That build is made by hand once per version and isn't kept in
+# this repository; the hash stops any other zip from shipping by accident.
+LIBRASHADER_ZIP = os.environ.get("LIBRASHADER_ZIP") or os.path.join(
+    ROOT, "..", "..", "librashader-build", "out",
+    "librashader-x86_64-windows-d3d11-v0.12.0-asukaneo1.zip")
+LIBRASHADER_SHA256 = "a47c8a3be8677cedb4722360d680ca2c2fb6cf90df713a7b6dc06ba689e9c50d"
+# AMD's headers, which the FSR preset includes: the one place .h may ship.
+SHADER_HEADERS = ("shaders/edge-smoothing/fsr/shaders/ffx_a.h",
+                  "shaders/edge-smoothing/fsr/shaders/ffx_fsr1.h")
+
+
+def librashader_dir():
+    """Unpacks the pinned librashader zip under build-release/."""
+    if not os.path.isfile(LIBRASHADER_ZIP):
+        sys.exit("missing %s (set LIBRASHADER_ZIP)" % LIBRASHADER_ZIP)
+    got = hashlib.sha256(open(LIBRASHADER_ZIP, "rb").read()).hexdigest()
+    if got != LIBRASHADER_SHA256:
+        sys.exit("%s is not the pinned build: sha256 %s" % (LIBRASHADER_ZIP, got))
+    out = os.path.join(BUILD, "librashader")
+    with zipfile.ZipFile(LIBRASHADER_ZIP) as z:
+        z.extractall(out)
+    return out
+
+
+def shader_files():
+    """Published name -> source for everything in assets/shaders."""
+    root = os.path.join(ROOT, "assets", "shaders")
+    files = {}
+    for d, _, names in os.walk(root):
+        for n in names:
+            src = os.path.join(d, n)
+            files["shaders/" + os.path.relpath(src, root).replace(os.sep, "/")] = src
+    return files
+
+
 # Published name -> source. Nothing else may be in the zip.
 def allow_list(game_exe, setup_exe):
+    lib = librashader_dir()
     return {
         "aggro_royale.exe": game_exe,
         "aggro_setup.exe": setup_exe,
@@ -80,6 +121,11 @@ def allow_list(game_exe, setup_exe):
         "licenses/xboxrecomp-LICENSE.txt": os.path.join(TOOLKIT, "LICENSE"),
         "licenses/xboxrecomp-NOTICE.txt": os.path.join(TOOLKIT, "NOTICE"),
         "licenses/LGPL-2.1.txt": os.path.join(TOOLKIT, "LICENSES", "LGPL-2.1.txt"),
+        "librashader.dll": os.path.join(lib, "librashader.dll"),
+        "licenses/librashader-LICENSE.txt": os.path.join(lib, "LICENSE.md"),
+        "licenses/librashader-SOURCE.txt": os.path.join(lib, "SOURCE.txt"),
+        "licenses/librashader-THIRDPARTY.txt": os.path.join(lib, "THIRDPARTY.txt"),
+        **shader_files(),
     }
 
 
@@ -114,7 +160,7 @@ def verify(zip_path, names, exes, xbes):
         problems.append("zip contents differ from the allow-list: %s" %
                         sorted(set(rel) ^ set(names)))
     for n in rel:
-        if n.lower().endswith(FORBIDDEN_EXT):
+        if n.lower().endswith(FORBIDDEN_EXT) and n not in SHADER_HEADERS:
             problems.append("forbidden file type in zip: " + n)
     if not xbes:
         problems.append("no --xbe given: the exes were not checked for game code")
@@ -182,7 +228,9 @@ def main():
         if src:
             if not os.path.isfile(src):
                 sys.exit("missing %s (for %s)" % (src, dest))
-            shutil.copyfile(src, os.path.join(stage, *dest.split("/")))
+            out = os.path.join(stage, *dest.split("/"))
+            os.makedirs(os.path.dirname(out), exist_ok=True)
+            shutil.copyfile(src, out)
     readme = open(os.path.join(ROOT, "tools", "release_readme.txt"), encoding="utf-8").read()
     with open(os.path.join(stage, "README.txt"), "w", encoding="utf-8", newline="\r\n") as f:
         f.write(readme.replace("{version}", version))

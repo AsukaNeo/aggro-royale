@@ -52,6 +52,9 @@ SETTINGS
     widescreen. Frame generation adds frames up to your display's refresh
     rate. If the picture is wrong on your graphics card, choose Renderer:
     Software.
+  - Shader, on the Graphics tab: RetroArch presets over the finished picture.
+    crt-lottes, crt-lottes-fast and crt-hyllian give a CRT look; fsr is AMD's
+    upscaler. Off by default; see shaders\README.txt.
   - Pause in background (on by default): the game and its sound stop while
     the window is in the background or minimised.
 
@@ -67,9 +70,14 @@ IF SOMETHING GOES WRONG
   - Settings live in aggroroyale.ini next to aggro_royale.exe; delete it to
     go back to the defaults. Every level is unlocked from a fresh save; set
     unlock_all=0 under [game] to play the career the original way.
-  - Saved games are kept in the "saves" folder here, so this whole folder is
-    portable: copy it to another PC or drive and your game, extras, settings
-    and saves come along. For a new version, unzip it over this folder.
+  - Everything stays in this folder: saved games in "saves", and the Xbox's
+    drives and caches in "data" (safe to delete; the game rebuilds it). The
+    whole folder is portable: copy it to another PC or drive and your game,
+    extras, settings and saves come along. For a new version, unzip it over
+    this folder. 0.9.2 and earlier kept the caches in
+    %LOCALAPPDATA%\Aggro Royale; that folder can be deleted once your saves
+    are in "saves" here. If this folder can't be written to (Program Files),
+    the game keeps using that one.
   - To use a different copy of the game, delete the "game" folder (or the
     [game] dir line in aggroroyale.ini) and run the setup again.
 
@@ -81,3 +89,6 @@ LEGAL
   copies. Parts of the xboxrecomp toolkit compiled into it are LGPL-2.1 (from
   xemu); their source is available at https://github.com/sp00nznet/xboxrecomp
   and this project's patch at https://github.com/AsukaNeo/aggro-royale.
+  The Shader setting uses librashader (MPL-2.0), included unmodified as
+  librashader.dll; where its source is, and its licence, are in the licenses
+  folder. The shader presets keep their own licences (shaders\README.txt).

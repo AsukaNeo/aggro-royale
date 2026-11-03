@@ -101,7 +101,7 @@ Press **F10**, or **Back+Start** on the pad, at any time. The settings sit under
 - **Resolution**: every resolution your monitor offers, at its highest refresh rate. After a change the game asks whether to keep it, and goes back by itself after 15 seconds.
 - **VSync**, **Scale** (fit, integer or stretch), **Widescreen**, **Frame generation** and an **FPS counter**.
 
-**Graphics**: the **renderer** (Direct3D 11 or the console's own way), **render resolution** up to 4x the Xbox's, changed while you play, **anisotropic filtering** up to 16x, **sharpening** (AMD FidelityFX CAS), **FXAA**, and the filter used to scale the picture.
+**Graphics**: the **renderer** (Direct3D 11 or the console's own way), **render resolution** up to 4x the Xbox's, changed while you play, **anisotropic filtering** up to 16x, **sharpening** (AMD FidelityFX CAS), **FXAA**, a **shader** (RetroArch presets through [librashader](https://github.com/SnowflakePowered/librashader), with three CRT looks and AMD FSR included), and the filter used to scale the picture.
 
 **Controls**: **rumble** and an extra **stick dead zone** for worn sticks.
 
