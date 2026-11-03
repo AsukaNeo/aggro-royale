@@ -334,17 +334,17 @@ static void ar_mods(void)
         _putenv_s("RECOMP_MODS", list);
 }
 
-static void ar_portable_saves(const char *old_dir)
+/* The folder [game] <key> in aggroroyale.ini names (relative to the folder
+ * that holds "game", or absolute), def when it names none -- made if missing.
+ * 1 when it can be written to (a file can be dropped in it), else 0: it sits
+ * somewhere read-only such as Program Files. */
+static int ar_portable_dir(const char *key, const char *def, char *dir, size_t n)
 {
-    char exe_dir[MAX_PATH], ini[MAX_PATH], want[MAX_PATH], dir[MAX_PATH];
-    char probe[MAX_PATH], from[MAX_PATH], to[MAX_PATH], *slash;
-    static const char *const subs[] = { "UDATA", "TDATA" };
+    char exe_dir[MAX_PATH], ini[MAX_PATH], want[MAX_PATH];
+    char probe[MAX_PATH], *slash;
     char base[MAX_PATH];
     HANDLE f;
-    size_t i;
 
-    if (getenv("RECOMP_SAVE_DIR") && *getenv("RECOMP_SAVE_DIR"))
-        return;
     GetModuleFileNameA(NULL, exe_dir, MAX_PATH);
     if ((slash = strrchr(exe_dir, '\\')) != NULL)
         *slash = 0;
@@ -359,23 +359,71 @@ static void ar_portable_saves(const char *old_dir)
             snprintf(base, sizeof base, "%s", g);
         }
     }
-    GetPrivateProfileStringA("game", "saves", "saves", want, sizeof want, ini);
+    GetPrivateProfileStringA("game", key, def, want, sizeof want, ini);
     if (want[0] == '\\' || (want[0] && want[1] == ':'))
-        snprintf(dir, sizeof dir, "%s", want);
+        snprintf(dir, n, "%s", want);
     else
-        snprintf(dir, sizeof dir, "%s\\%s", base, want);
+        snprintf(dir, n, "%s\\%s", base, want);
 
-    /* Writable? Make it and drop a file in it. */
     CreateDirectoryA(dir, NULL);
     snprintf(probe, sizeof probe, "%s\\.write-test", dir);
     f = CreateFileA(probe, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS,
                     FILE_ATTRIBUTE_TEMPORARY | FILE_FLAG_DELETE_ON_CLOSE, NULL);
-    if (f == INVALID_HANDLE_VALUE) {
+    if (f == INVALID_HANDLE_VALUE)
+        return 0;
+    CloseHandle(f);
+    return 1;
+}
+
+#ifdef AR_RELEASE
+/* The Xbox's partition images (5 GB, sparse), its cache partition and the
+ * T:/U: folders, in a "data" folder beside the game, so nothing is left in
+ * %LOCALAPPDATA% and the whole install moves as one folder. All of it is safe
+ * to delete: the game rebuilds it. [game] data in aggroroyale.ini names
+ * another folder. Where that can't be written, old_dir as before (returned).
+ * T:/U: content an earlier version left in old_dir is copied over once; its
+ * cache is not -- the game rebuilds that. */
+static const char *ar_portable_data(const char *old_dir)
+{
+    static char dir[MAX_PATH];
+    char from[MAX_PATH], to[MAX_PATH];
+    static const char *const subs[] = { "TitleData", "UserData" };
+    size_t i;
+
+    if (!ar_portable_dir("data", "data", dir, sizeof dir)) {
+        fprintf(stderr, "[BOOT] data: %s is not writable; using %s\n",
+                dir, old_dir ? old_dir : "the default folder");
+        return old_dir;
+    }
+    for (i = 0; old_dir && i < sizeof subs / sizeof subs[0]; i++) {
+        snprintf(from, sizeof from, "%s\\%s", old_dir, subs[i]);
+        snprintf(to, sizeof to, "%s\\%s", dir, subs[i]);
+        if (ar_has_files(from) && !ar_has_files(to)) {
+            ar_copy_tree(from, to);
+            fprintf(stderr, "[BOOT] data: copied %s to %s\n", from, to);
+        }
+    }
+    if (old_dir && GetFileAttributesA(old_dir) != INVALID_FILE_ATTRIBUTES)
+        fprintf(stderr, "[BOOT] data: %s is no longer used; it can be deleted "
+                "once your saves are in the saves folder\n", old_dir);
+    fprintf(stderr, "[BOOT] data: %s\n", dir);
+    return dir;
+}
+#endif
+
+static void ar_portable_saves(const char *old_dir)
+{
+    char dir[MAX_PATH], from[MAX_PATH], to[MAX_PATH];
+    static const char *const subs[] = { "UDATA", "TDATA" };
+    size_t i;
+
+    if (getenv("RECOMP_SAVE_DIR") && *getenv("RECOMP_SAVE_DIR"))
+        return;
+    if (!ar_portable_dir("saves", "saves", dir, sizeof dir)) {
         fprintf(stderr, "[BOOT] saves: %s is not writable; keeping them in %s\n",
                 dir, old_dir ? old_dir : "the default folder");
         return;
     }
-    CloseHandle(f);
 
     for (i = 0; old_dir && i < sizeof subs / sizeof subs[0]; i++) {
         snprintf(from, sizeof from, "%s\\%s", old_dir, subs[i]);
@@ -903,6 +951,24 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
     setvbuf(stdout, NULL, _IONBF, 0);
     setvbuf(stderr, NULL, _IONBF, 0);
 
+#ifdef AR_RELEASE
+    /* Work in the exe's own folder whatever a shortcut's "Start in" says, so
+     * the files written relative to it (xbox_kernel.log, screenshots\,
+     * aggroroyale.ini) stay in the install's folder. A path the exe was
+     * opened with is made absolute first. */
+    {
+        static char opened[MAX_PATH];
+        char exe_dir[MAX_PATH], *slash;
+        if (__argc > 1 && GetFullPathNameA(__argv[1], MAX_PATH, opened, NULL))
+            __argv[1] = opened;
+        GetModuleFileNameA(NULL, exe_dir, MAX_PATH);
+        if ((slash = strrchr(exe_dir, '\\')) != NULL) {
+            *slash = 0;
+            SetCurrentDirectoryA(exe_dir);
+        }
+    }
+#endif
+
     printf("=== " AR_APP " ===\n");
     printf("Loading XBE...\n");
 
@@ -1013,16 +1079,26 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
         extern void xbox_path_init(const char *game_dir, const char *save_dir);
         const char *save_dir = NULL;
         /* The Xbox's partition images and caches (5 GB sparse, rebuilt by
-         * the game on its own) under the game's own name, not the toolkit's
-         * shared %LOCALAPPDATA%\xboxrecomp; the saves themselves beside the
-         * game (ar_portable_saves), in every build. */
+         * the game on its own): beside the game in a release build
+         * (ar_portable_data); under the game's own name in %LOCALAPPDATA%,
+         * not the toolkit's shared xboxrecomp folder, in a developer build.
+         * The saves themselves beside the game (ar_portable_saves), in
+         * every build. */
         static char cache_root[MAX_PATH];
         const char *local = getenv("LOCALAPPDATA");
         if (local && *local) {
             snprintf(cache_root, sizeof cache_root, "%s\\" AR_APP, local);
             save_dir = cache_root;
         }
+#ifdef AR_RELEASE
+        {
+            const char *old_dir = save_dir;
+            save_dir = ar_portable_data(old_dir);
+            ar_portable_saves(old_dir);
+        }
+#else
         ar_portable_saves(save_dir);
+#endif
         ar_mods();
         ar_soundtracks();
         xbox_path_init(YOUR_GAME_DIR, save_dir);
